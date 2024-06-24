@@ -38,12 +38,12 @@ int main(int argc, char *argv[])
     int ret;
     char buffer[BUFFER_SIZE]; // For storing the message read from a socket during a POLLIN revent
 
-    nfds_t num_open_fds, nfds;
+    nfds_t nfds;
     ssize_t s;
     struct pollfd *pfds;
-    int ready;
+    int ready; // How many sockets are ready for polling
 
-    num_open_fds = nfds = num_sockets;
+    nfds = num_sockets;
 
     pfds = calloc(nfds, sizeof(struct pollfd));
 
@@ -96,6 +96,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* Blocking accept for expected number of client connections */
     for (int i = 0; i < num_sockets; i++)
     {
         data_sockets[i] = accept(con_sockets[i], NULL, NULL);
@@ -108,19 +109,19 @@ int main(int argc, char *argv[])
         pfds[i].events = POLLIN;
     }
 
-    int closed_data_socket_fd = -1;
+    int closed_data_socket_num = -1;
 
     int dest_id = -1;
 
     for (;;)
     {
         /* Wait for incoming connection. */
-        while (closed_data_socket_fd == -1)
+        while (closed_data_socket_num == -1)
         {
             printf("About to poll()\n");
             ready = poll(pfds, nfds, -1);
             if (ready == -1)
-                perror("accept");
+                perror("poll");
 
             printf("Ready: %d\n", ready);
 
@@ -137,20 +138,21 @@ int main(int argc, char *argv[])
                     {
                         s = read(pfds[i].fd, buffer, sizeof(buffer));
                         if (s == -1)
+                            perror("read");
                             exit;
                         if (s == 0)
                         {
-                            closed_data_socket_fd = i;
+                            closed_data_socket_num = i;
                             printf("Connection to socket: %d closed . {zero byte read indicates this}\n", i);
                             exit;
                         }
-                        printf("    read %zd bytes: %.*s\n",
+                        printf("read %zd bytes: %.*s\n",
                                s, (int)s, buffer);
 
                         // First byte is the destination socket num
                         dest_id = buffer[0] - '0'; // convert ascii char to int equivalent ('0' is 48)
                         printf("Destination ID: %d \n", dest_id);
-                        if (dest_id > -1)
+                        if (dest_id > -1 && dest_id < num_sockets)
                         {
                             s = write(pfds[dest_id].fd, buffer, strlen(buffer) + 1);
                             if (s > 0)
@@ -163,9 +165,10 @@ int main(int argc, char *argv[])
                     { /* POLLERR | POLLHUP */
                         printf("    closing fd %d\n", pfds[i].fd);
                         // get the value of the fd for the closed data socket -
-                        closed_data_socket_fd = i;
+                        closed_data_socket_num = i;
                         if (close(pfds[i].fd) == -1)
-                            exit;
+                            perror("closing socket");
+                        exit;
                     }
                 }
             }
@@ -173,15 +176,15 @@ int main(int argc, char *argv[])
 
         // Attempt re-connect with closed socket with a timeout
         printf("Listening again for reconnect \n");
-        data_sockets[closed_data_socket_fd] = accept(con_sockets[closed_data_socket_fd], NULL, NULL);
-        if (data_sockets[closed_data_socket_fd] == -1)
+        data_sockets[closed_data_socket_num] = accept(con_sockets[closed_data_socket_num], NULL, NULL);
+        if (data_sockets[closed_data_socket_num] == -1)
         {
             perror("accept");
             exit(EXIT_FAILURE);
         }
-        pfds[closed_data_socket_fd].fd = data_sockets[closed_data_socket_fd];
-        pfds[closed_data_socket_fd].events = POLLIN;
-        closed_data_socket_fd = -1;
+        pfds[closed_data_socket_num].fd = data_sockets[closed_data_socket_num];
+        pfds[closed_data_socket_num].events = POLLIN;
+        closed_data_socket_num = -1;
     }
 
     // exit(EXIT_SUCCESS);

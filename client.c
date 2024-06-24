@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <poll.h>
+#include <fcntl.h>
 #include "connection.h"
 
 int main(int argc, char *argv[])
@@ -27,17 +29,10 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    /*
-     * For portability clear the whole structure, since some
-     * implementations have additional (nonstandard) fields in
-     * the structure.
-     */
-
     memset(&addr, 0, sizeof(addr));
 
     /* Connect socket to socket address. */
     // Arg 1 is the client 'num' which determines what named pipe to associated with the socket
-
     char fifo_name[32];
     // Create a name of the fifo based on this iter val
     char fifo_name_pre[] = "fifo_socket_num_";
@@ -56,61 +51,58 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    /* Send arguments. */
+    // Setup polling for non blocking read
+    struct sockaddr_un *s_name = calloc(0, sizeof(struct sockaddr_un));
+    nfds_t nfds;
+    struct pollfd *pfds;
+    nfds = 1;
 
-    char input[100];
+    pfds = calloc(nfds, sizeof(struct pollfd));
+
+    pfds[0].fd = data_socket;
+    pfds[0].events = POLLIN;
+
+    /* Send arguments. */
+    char user_input[100];
+
+    int ready;
 
     while (1)
     {
-        fgets(input, 100, stdin);
+        fgets(user_input, 100, stdin);
 
-        ret = write(data_socket, input, strlen(input) + 1);
+        ret = write(data_socket, user_input, strlen(user_input) + 1);
         if (ret == -1)
         {
             perror("write");
+            printf("Error writing \n");
             break;
         }
 
-        ret = read(data_socket, buffer, sizeof(buffer));
-        if (ret == -1)
+        /* Poll the socket */
+        ready = poll(pfds, nfds, 10); // 10 milli sec timeout
+        if (ready == -1)
         {
-            perror("read");
-            exit(EXIT_FAILURE);
+            perror("poll");
+            exit;
         }
-        if(ret > 0){
-            printf("Received: %s", buffer);
+        if (pfds[0].revents != 0)
+        {
+            if (pfds[0].revents & POLLIN)
+            {
+                ret = read(data_socket, buffer, sizeof(buffer));
+                if (ret == -1)
+                {
+                    perror("read");
+                    exit(EXIT_FAILURE);
+                }
+                else
+                {
+                    printf("Received: %s", buffer);
+                }
+            }
         }
     }
-
-    /* Request result. */
-    // while (1)
-    // {
-    //     strcpy(buffer, "END");
-    //     ret = write(data_socket, buffer, strlen(buffer) + 1);
-    //     if (ret == -1)
-    //     {
-    //         perror("write");
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     sleep(1);
-    // }
-
-    /* Receive result. */
-
-    ret = read(data_socket, buffer, sizeof(buffer));
-    if (ret == -1)
-    {
-        perror("read");
-        exit(EXIT_FAILURE);
-    }
-
-    /* Ensure buffer is 0-terminated. */
-
-    buffer[sizeof(buffer) - 1] = 0;
-
-    printf("Result = %s\n", buffer);
-
-    /* Close socket. */
 
     close(data_socket);
 
