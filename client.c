@@ -13,14 +13,37 @@
 #include <fcntl.h>
 #include "connection.h"
 
+#define NUM_CLIENTS_TO_POLL 2
+
 int main(int argc, char *argv[])
 {
+    if (argc != 2)
+    {
+        fprintf(stderr, "Usage: %s <client_id>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    int client_id = atoi(argv[1]);
+
+    if (client_id < 0)
+    {
+        fprintf(stderr, "Client ID must be positive int\n");
+        exit(EXIT_FAILURE);
+    }
+
     struct sockaddr_un addr;
     int ret;
     int data_socket;
-    char buffer[BUFFER_SIZE];
+    char socket_buf[BUFFER_SIZE];
+    char std_in_buf[BUFFER_SIZE];
+    int ready;
 
-    /* Create local socket. */
+    // Setup polling for non blocking read
+    struct sockaddr_un *s_name = calloc(NUM_CLIENTS_TO_POLL, sizeof(struct sockaddr_un));
+    nfds_t nfds;
+    struct pollfd *pfds;
+    nfds = NUM_CLIENTS_TO_POLL;
+    pfds = calloc(nfds, sizeof(struct pollfd));
 
     data_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (data_socket == -1)
@@ -28,17 +51,13 @@ int main(int argc, char *argv[])
         perror("socket");
         exit(EXIT_FAILURE);
     }
-
     memset(&addr, 0, sizeof(addr));
 
-    /* Connect socket to socket address. */
     // Arg 1 is the client 'num' which determines what named pipe to associated with the socket
-    char fifo_name[32];
-    // Create a name of the fifo based on this iter val
-    char fifo_name_pre[] = "fifo_socket_num_";
-    sprintf(fifo_name, "%s%d", fifo_name_pre, atoi(argv[1]));
+    char fifo_name[BUFFER_SIZE];
+    sprintf(fifo_name, "%s%d", SOCKET_PATH_PREPEND, client_id);
 
-    printf("Connecting to %s\n", fifo_name);
+    printf("Attempting to connect to %s\n", fifo_name);
 
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, fifo_name, sizeof(addr.sun_path) - 1);
@@ -50,61 +69,63 @@ int main(int argc, char *argv[])
         fprintf(stderr, "The server is down.\n");
         exit(EXIT_FAILURE);
     }
+    printf("Successfully Connected to %s\n", fifo_name);
 
-    // Setup polling for non blocking read
-    struct sockaddr_un *s_name = calloc(0, sizeof(struct sockaddr_un));
-    nfds_t nfds;
-    struct pollfd *pfds;
-    nfds = 1;
+    pfds[1].fd = data_socket;
+    pfds[1].events = POLLIN;
 
-    pfds = calloc(nfds, sizeof(struct pollfd));
-
-    pfds[0].fd = data_socket;
+    // Poll from stdin as well as the socket (for now clients take user input, but later
+    //  they will emit messages )
+    pfds[0].fd = 0;
     pfds[0].events = POLLIN;
-
-    /* Send arguments. */
-    char user_input[100];
-
-    int ready;
 
     while (1)
     {
-        fgets(user_input, 100, stdin);
-
-        ret = write(data_socket, user_input, strlen(user_input) + 1);
-        if (ret == -1)
-        {
-            perror("write");
-            printf("Error writing \n");
-            break;
-        }
-
-        /* Poll the socket */
         ready = poll(pfds, nfds, 10); // 10 milli sec timeout
         if (ready == -1)
         {
             perror("poll");
             exit;
         }
-        if (pfds[0].revents != 0)
+        for (nfds_t i = 0; i < nfds; i++)
         {
-            if (pfds[0].revents & POLLIN)
+            if (pfds[i].revents != 0)
             {
-                ret = read(data_socket, buffer, sizeof(buffer));
-                if (ret == -1)
+                if (pfds[i].revents & POLLIN)
                 {
-                    perror("read");
-                    exit(EXIT_FAILURE);
-                }
-                else
-                {
-                    printf("Received: %s", buffer);
+                    if (i == 0)
+                    { // if std in
+                        printf("reading from std in: \n");
+                        fgets(std_in_buf, BUFFER_SIZE, stdin);
+
+                        ret = write(data_socket, std_in_buf, strlen(std_in_buf) + 1);
+                        if (ret == -1)
+                        {
+                            perror("write");
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        ret = read(data_socket, socket_buf, sizeof(socket_buf));
+                        if (ret == -1)
+                        {
+                            perror("read");
+                            exit(EXIT_FAILURE);
+                        }
+                        else if (ret == 0)
+                        {
+                            printf("Connection to server droppped to server. Exiting... \n");
+                            return 0;
+                        }
+                        else
+                        {
+                            printf("Received: %s", socket_buf);
+                        }
+                    }
                 }
             }
         }
     }
-
-    close(data_socket);
-
-    exit(EXIT_SUCCESS);
+    // exit(EXIT_SUCCESS);
 }

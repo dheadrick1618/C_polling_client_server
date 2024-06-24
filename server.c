@@ -34,18 +34,16 @@ int main(int argc, char *argv[])
     struct sockaddr_un *s_name = calloc(num_sockets, sizeof(struct sockaddr_un));
     int con_sockets[num_sockets];  // fd for socket listening for connections
     int data_sockets[num_sockets]; // fd for sockets that have a connection
-    int down_flag = 0;
-    int ret;
-    char buffer[BUFFER_SIZE]; // For storing the message read from a socket during a POLLIN revent
-
-    nfds_t nfds;
+    int ret;                       // return value used for various POSIX system calls and libc fxns
+    char buffer[BUFFER_SIZE];      // For storing the message read from a socket during a POLLIN revent
+    nfds_t nfds;                   // Num file descriptors (how many fds are we polling)
     ssize_t s;
     struct pollfd *pfds;
-    int ready; // How many sockets are ready for polling
-
     nfds = num_sockets;
-
     pfds = calloc(nfds, sizeof(struct pollfd));
+    int ready;                       // How many sockets are ready for polling
+    int closed_data_socket_num = -1; // Flag set to a fd value when the associated fd client connection is dropped
+    int dest_id = -1;                // The destination ID of a recevied message (for now just first byte of input)
 
     for (int i = 0; i < num_sockets; i++)
     {
@@ -56,19 +54,14 @@ int main(int argc, char *argv[])
             perror("con socket");
             exit(EXIT_FAILURE);
         }
-        /*
-         * For portability clear the whole structure, since some
-         * implementations have additional (nonstandard) fields in
-         * the structure.
-         */
+       
         memset(&s_name[i], 0, sizeof(s_name));
 
         /* Bind socket to socket name. */
         s_name[i].sun_family = AF_UNIX;
         char fifo_name[32];
         // Create a name of the fifo based on this iter val
-        char fifo_name_pre[] = "fifo_socket_num_";
-        sprintf(fifo_name, "%s%d", fifo_name_pre, i);
+        sprintf(fifo_name, "%s%d", SOCKET_PATH_PREPEND, i);
         printf("Fifo name: %s\n", fifo_name);
 
         // Copy the name of the socket (fifo abs path) into the socket name struct
@@ -109,10 +102,6 @@ int main(int argc, char *argv[])
         pfds[i].events = POLLIN;
     }
 
-    int closed_data_socket_num = -1;
-
-    int dest_id = -1;
-
     for (;;)
     {
         /* Wait for incoming connection. */
@@ -129,21 +118,16 @@ int main(int argc, char *argv[])
             {
                 if (pfds[i].revents != 0)
                 {
-                    // printf("  fd=%d; events: %s%s%s\n", pfds[i].fd,
-                    //        (pfds[i].revents & POLLIN) ? "POLLIN " : "",
-                    //        (pfds[i].revents & POLLHUP) ? "POLLHUP " : "",
-                    //        (pfds[i].revents & POLLERR) ? "POLLERR " : "");
-
                     if (pfds[i].revents & POLLIN)
                     {
                         s = read(pfds[i].fd, buffer, sizeof(buffer));
                         if (s == -1)
                             perror("read");
-                            exit;
+                        exit;
                         if (s == 0)
                         {
                             closed_data_socket_num = i;
-                            printf("Connection to socket: %d closed . {zero byte read indicates this}\n", i);
+                            printf("Connection to socket: %d closed . {zero byte read indicates this}\n", (int)i);
                             exit;
                         }
                         printf("read %zd bytes: %.*s\n",
@@ -157,7 +141,7 @@ int main(int argc, char *argv[])
                             s = write(pfds[dest_id].fd, buffer, strlen(buffer) + 1);
                             if (s > 0)
                             {
-                                printf("Wrote: %d bytes to socket num: %d \n", s, dest_id);
+                                printf("Wrote: %d bytes to socket num: %d \n", (int)s, dest_id);
                             }
                         }
                     }
@@ -175,7 +159,7 @@ int main(int argc, char *argv[])
         }
 
         // Attempt re-connect with closed socket with a timeout
-        printf("Listening again for reconnect \n");
+        printf("Listening - blocking wait for for connection request from client num: %d\n", closed_data_socket_num);
         data_sockets[closed_data_socket_num] = accept(con_sockets[closed_data_socket_num], NULL, NULL);
         if (data_sockets[closed_data_socket_num] == -1)
         {
@@ -184,7 +168,7 @@ int main(int argc, char *argv[])
         }
         pfds[closed_data_socket_num].fd = data_sockets[closed_data_socket_num];
         pfds[closed_data_socket_num].events = POLLIN;
-        closed_data_socket_num = -1;
+        closed_data_socket_num = -1; //reset flag now that connection re-established
     }
 
     // exit(EXIT_SUCCESS);
