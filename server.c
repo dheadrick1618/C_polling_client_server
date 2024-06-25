@@ -1,6 +1,8 @@
 /*
- * File server.c
- */
+TODO
+ How to handle if an arch component connection is lost with the dispatcher ?
+ How to handle if an arch component is not being used (can be ignored by dispatcher) i.e. for testing or if it needs to be killed and restarted ?
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +13,8 @@
 #include <poll.h>
 #include <fcntl.h>
 #include "connection.h"
+
+#define LISTEN_BACKLOG_SIZE 3
 
 int main(int argc, char *argv[])
 {
@@ -48,21 +52,15 @@ int main(int argc, char *argv[])
     for (int i = 0; i < num_sockets; i++)
     {
         /* Create a socket struct for listening for connection */
-        con_sockets[i] = socket(AF_UNIX, SOCK_SEQPACKET, 0);
-        if (con_sockets[i] == -1)
-        {
-            perror("con socket");
-            exit(EXIT_FAILURE);
-        }
-       
+        con_sockets[i] = create_socket();
+
         memset(&s_name[i], 0, sizeof(s_name));
 
-        /* Bind socket to socket name. */
         s_name[i].sun_family = AF_UNIX;
         char fifo_name[32];
         // Create a name of the fifo based on this iter val
         sprintf(fifo_name, "%s%d", SOCKET_PATH_PREPEND, i);
-        printf("Fifo name: %s\n", fifo_name);
+        printf("Created Fifo: %s\n", fifo_name);
 
         // Copy the name of the socket (fifo abs path) into the socket name struct
         strncpy(s_name[i].sun_path, fifo_name, sizeof(s_name[i].sun_path) - 1);
@@ -81,7 +79,7 @@ int main(int argc, char *argv[])
         //  * to 20. So while one request is being processed other requests
         //  * can be waiting.
         //  */
-        ret = listen(con_sockets[i], 20);
+        ret = listen(con_sockets[i], LISTEN_BACKLOG_SIZE);
         if (ret == -1)
         {
             perror("listen");
@@ -107,11 +105,10 @@ int main(int argc, char *argv[])
         /* Wait for incoming connection. */
         while (closed_data_socket_num == -1)
         {
-            printf("About to poll()\n");
+            printf("\nAbout to poll()\n");
             ready = poll(pfds, nfds, -1);
             if (ready == -1)
                 perror("poll");
-
             printf("Ready: %d\n", ready);
 
             for (nfds_t i = 0; i < nfds; i++)
@@ -122,20 +119,21 @@ int main(int argc, char *argv[])
                     {
                         s = read(pfds[i].fd, buffer, sizeof(buffer));
                         if (s == -1)
+                        {
                             perror("read");
-                        exit;
+                            exit;
+                        }
                         if (s == 0)
                         {
                             closed_data_socket_num = i;
                             printf("Connection to socket: %d closed . {zero byte read indicates this}\n", (int)i);
                             exit;
                         }
-                        printf("read %zd bytes: %.*s\n",
-                               s, (int)s, buffer);
+                        printf("read %zd bytes: %.*s", s, (int)s, buffer);
 
                         // First byte is the destination socket num
                         dest_id = buffer[0] - '0'; // convert ascii char to int equivalent ('0' is 48)
-                        printf("Destination ID: %d \n", dest_id);
+                        printf("Destination ID field value: %d \n", dest_id);
                         if (dest_id > -1 && dest_id < num_sockets)
                         {
                             s = write(pfds[dest_id].fd, buffer, strlen(buffer) + 1);
@@ -158,7 +156,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        // Attempt re-connect with closed socket with a timeout
+        // TODO - Add a timeout for this
         printf("Listening - blocking wait for for connection request from client num: %d\n", closed_data_socket_num);
         data_sockets[closed_data_socket_num] = accept(con_sockets[closed_data_socket_num], NULL, NULL);
         if (data_sockets[closed_data_socket_num] == -1)
@@ -168,8 +166,8 @@ int main(int argc, char *argv[])
         }
         pfds[closed_data_socket_num].fd = data_sockets[closed_data_socket_num];
         pfds[closed_data_socket_num].events = POLLIN;
-        closed_data_socket_num = -1; //reset flag now that connection re-established
+        closed_data_socket_num = -1; // reset flag now that connection re-established
     }
 
-    // exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);
 }

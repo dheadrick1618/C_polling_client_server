@@ -13,7 +13,8 @@
 #include <fcntl.h>
 #include "connection.h"
 
-#define NUM_CLIENTS_TO_POLL 2
+#define NUM_CLIENTS_TO_POLL 2 //to poll both the unix domain socket fd AND stdin fd
+#define CLIENT_POLL_TIMEOUT_MS 10
 
 int main(int argc, char *argv[])
 {
@@ -31,7 +32,12 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    char fifo_name[BUFFER_SIZE];
+    // Arg 1 is the client 'num' which determines what named pipe to associated with the socket
+    sprintf(fifo_name, "%s%d", SOCKET_PATH_PREPEND, client_id);
+
     struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
     int ret;
     int data_socket;
     char socket_buf[BUFFER_SIZE];
@@ -44,18 +50,12 @@ int main(int argc, char *argv[])
     struct pollfd *pfds;
     nfds = NUM_CLIENTS_TO_POLL;
     pfds = calloc(nfds, sizeof(struct pollfd));
+    
+    // Poll from stdin as well as the socket (for now clients take user input and send this as message)
+    pfds[0].fd = 0;
+    pfds[0].events = POLLIN;
 
-    data_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0);
-    if (data_socket == -1)
-    {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
-    memset(&addr, 0, sizeof(addr));
-
-    // Arg 1 is the client 'num' which determines what named pipe to associated with the socket
-    char fifo_name[BUFFER_SIZE];
-    sprintf(fifo_name, "%s%d", SOCKET_PATH_PREPEND, client_id);
+    data_socket = create_socket();
 
     printf("Attempting to connect to %s\n", fifo_name);
 
@@ -66,22 +66,16 @@ int main(int argc, char *argv[])
                   sizeof(addr));
     if (ret == -1)
     {
-        fprintf(stderr, "The server is down.\n");
-        exit(EXIT_FAILURE);
+        handle_error("The server is down\n");
     }
     printf("Successfully Connected to %s\n", fifo_name);
 
     pfds[1].fd = data_socket;
     pfds[1].events = POLLIN;
-
-    // Poll from stdin as well as the socket (for now clients take user input, but later
-    //  they will emit messages )
-    pfds[0].fd = 0;
-    pfds[0].events = POLLIN;
-
+    
     while (1)
     {
-        ready = poll(pfds, nfds, 10); // 10 milli sec timeout
+        ready = poll(pfds, nfds, CLIENT_POLL_TIMEOUT_MS); // 10 milli sec timeout
         if (ready == -1)
         {
             perror("poll");
@@ -115,7 +109,7 @@ int main(int argc, char *argv[])
                         }
                         else if (ret == 0)
                         {
-                            printf("Connection to server droppped to server. Exiting... \n");
+                            printf("Connection to server droppped. Exiting... \n");
                             return 0;
                         }
                         else
@@ -127,5 +121,5 @@ int main(int argc, char *argv[])
             }
         }
     }
-    // exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);
 }
