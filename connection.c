@@ -21,3 +21,36 @@ int create_socket(){
     }
     return data_socket; 
 }
+
+component_struct* component_factory(char* name){
+    int ret;
+    component_struct *c = malloc(sizeof(component_struct));     
+    strcpy(c->name, name);
+    c->connected = 0;
+    c->conn_socket_fd = create_socket();
+    printf("Created conn socket, with fd: %d\n", c->conn_socket_fd);
+
+    // 2. Bind the conn socket fd [from socket() call] to an address in unix domain (fifo file)
+    sprintf(c->fifo_path, "%s%s", SOCKET_PATH_PREPEND, c->name);
+    strcpy(c->conn_socket.sun_path, c->fifo_path); // strcpy path into conn socket addr
+    printf("Socket file path: %s\n", c->conn_socket.sun_path);
+    unlink(c->conn_socket.sun_path); // remove socket if it already exists
+    c->conn_socket.sun_family = AF_UNIX;
+    ret = bind(c->conn_socket_fd, (const struct sockaddr *)&c->conn_socket, sizeof(c->conn_socket));
+    if (ret < 0)
+    {
+        handle_error("binding conn socket\n");
+    }
+    printf("Bind conn socket for %s \n", name);
+
+    // 3. Call listen on the bound socket for incomming conn requests from clients
+    ret = listen(c->conn_socket_fd, LISTEN_BACKLOG_SIZE);
+    if (ret == -1){
+        handle_error("conn socket listen\n");
+    }
+    printf("Listening conn socket for %s \n", name);
+    // 4. Call accept to accept conn request from client - returns new descriptor for data between client and server
+    // 5. Handle connection now with data socket
+
+    return c;
+}

@@ -1,10 +1,3 @@
-
-/*
-TODO
- How to handle if an arch component connection is lost with the dispatcher ?
- How to handle if an arch component is not being used (can be ignored by dispatcher) i.e. for testing or if it needs to be killed and restarted ?
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,18 +10,7 @@ TODO
 
 #define LISTEN_BACKLOG_SIZE 3
 #define NAME_SIZE_MAX 32
-
-/// @brief Manage each client connection
-typedef struct subsystem_struct
-{
-    char name[32];      // Name of subsystem / payload
-    char fifo_path[32]; // Path to fifo used by Unix Domain Socket
-    int connected;      // connection state [for now either con / discon] (connected / waiting for conn / ignore)
-    int conn_socket_fd; // connection socket fd for polling for connection
-    int data_socket_fd; // data socket fd for polling when there is a connection
-    struct sockaddr_un conn_socket;
-    struct sockaddr_un data_socket;
-} subsystem_struct;
+#define POLLING_TIMEOUT_MS 10
 
 /*
 TODO
@@ -40,30 +22,8 @@ int main(int argc, char *argv[])
 {
     char buffer[100];
     int ret; // used for assessing returns of various fxn calls
-    struct sockaddr_un remote, local = {
-                                   .sun_family = AF_UNIX,
-                               };
-    subsystem_struct dfgm = {"DFGM", "", 0, -1, -1, local, remote};
 
-    // 1. Create connection (unix) sockets
-    dfgm.conn_socket_fd = create_socket();
-    printf("Conn fd is: %d\n", dfgm.conn_socket_fd);
-
-    // 2. Bind the conn socket fd [from socket() call] to an address in unix domain (fifo file)
-    sprintf(dfgm.fifo_path, "%s%s", SOCKET_PATH_PREPEND, dfgm.name);
-    strcpy(dfgm.conn_socket.sun_path, dfgm.fifo_path); // strcpy path into conn socket addr
-    printf("Socket file path: %s\n", dfgm.conn_socket.sun_path);
-    unlink(dfgm.conn_socket.sun_path); // remove socket if it already exists
-    ret = bind(dfgm.conn_socket_fd, (const struct sockaddr *)&dfgm.conn_socket, sizeof(dfgm.conn_socket));
-    if (ret < 0)
-    {
-        handle_error("binding conn socket\n");
-    }
-
-    // 3. Call listen on the bound socket for incomming conn requests from clients
-    listen(dfgm.conn_socket_fd, LISTEN_BACKLOG_SIZE);
-    // 4. Call accetp to accept conn request from client - returns new descriptor for data between client and server
-    // 5. Handle connection now with data socket
+    component_struct *dfgm = component_factory("dfgm");
 
     /* NOW implementing polling on conn socket for accepting connections */
     nfds_t nfds;         // num of fds we are polling
@@ -74,7 +34,7 @@ int main(int argc, char *argv[])
     pfds = calloc(nfds, sizeof(struct pollfd));
 
     // add fds of the conn sockets to the pfds array
-    pfds[0].fd = dfgm.conn_socket_fd;
+    pfds[0].fd = dfgm->conn_socket_fd;
     pfds[0].events = POLLIN;
 
     // Add conn socket fds to polling fd array
@@ -94,21 +54,22 @@ int main(int argc, char *argv[])
                 if (pfds[i].revents & POLLIN)
                 {
                     // IF we are waiting to make connection:
-                    if (dfgm.data_socket_fd == -1)
+                    if (dfgm->connected == 0)
                     {
                         // Receive input request from dfgm conn client
                         //  Accept this conn request and get the data socket fd (returned from accept())
                         printf("WE GOT A CONNECTION \n");
-                        socklen_t addrlen = sizeof(dfgm.data_socket);
-                        ret = accept(dfgm.conn_socket_fd, (struct sockaddr *)&dfgm.data_socket, &addrlen);
+                        socklen_t addrlen = sizeof(dfgm->data_socket);
+                        ret = accept(dfgm->conn_socket_fd, (struct sockaddr *)&dfgm->data_socket, &addrlen);
                         if (ret == -1)
                         {
                             perror("accept");
                             exit(EXIT_FAILURE);
                         }
-                        dfgm.data_socket_fd = ret;
-                        printf("Dfgm data socket val: %d\n", dfgm.data_socket_fd);
-                        pfds[0].fd = dfgm.data_socket_fd;
+                        dfgm->data_socket_fd = ret;
+                        printf("Dfgm data socket val: %d\n", dfgm->data_socket_fd);
+                        pfds[0].fd = dfgm->data_socket_fd;
+                        dfgm->connected = 1;
                     }
                     else
                     {
@@ -122,9 +83,9 @@ int main(int argc, char *argv[])
                         // If a zero is read, then the connection is dropped. Set the polling fd back to the conn_socket_fd (go back to listening for connection)
                         if (ret == 0)
                         {
-                            pfds[0].fd = dfgm.conn_socket_fd; // Go back to polling the conn socket fd to listen for client connections
-                            dfgm.data_socket_fd = -1; //Reset the data socket fd (so we know we are looking for conn revents on the poll)
-                            printf("Connection to socket: %s closed . {zero byte read indicates this}\n", dfgm.name);
+                            pfds[0].fd = dfgm->conn_socket_fd; // Go back to polling the conn socket fd to listen for client connections
+                            dfgm->connected = 0; //Reset the data socket fd (so we know we are looking for conn revents on the poll)
+                            printf("Connection to socket: %s closed . {zero byte read indicates this}\n", dfgm->name);
                         }
                         printf("read %zd bytes: %.*s", ret, (int)ret, buffer);
                     }
