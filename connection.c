@@ -9,23 +9,41 @@
 #include <fcntl.h>
 #include "connection.h"
 
-void handle_error(char *error_msg){
-       fprintf(stderr, "Error: %s", error_msg); 
-       exit(EXIT_FAILURE);
+void handle_error(char *error_msg)
+{
+    fprintf(stderr, "Error: %s", error_msg);
+    exit(EXIT_FAILURE);
 }
 
-int create_socket(){
+int create_socket()
+{
     int data_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0);
-    if (data_socket == -1){
+    if (data_socket == -1)
+    {
         handle_error("socket_creation");
     }
-    return data_socket; 
+    return data_socket;
 }
 
-component_struct* component_factory(char* name){
+/// @brief Use byte offset of a read msg to get destination ID. 
+/// @param data_buf 
+/// @return 
+int get_msg_dest_id(char *data_buf)
+{
+    // Use byte offset
+    int dest_id = data_buf[2];
+
+    //TEMP for now we are sending ascii chars, so we want to offset the numerical value
+    dest_id -= '0';
+    return dest_id;
+}
+
+ComponentStruct *component_factory(char *name, int component_id)
+{
     int ret;
-    component_struct *c = malloc(sizeof(component_struct));     
+    ComponentStruct *c = malloc(sizeof(ComponentStruct));
     strcpy(c->name, name);
+    c->component_id = component_id;
     c->connected = 0;
     c->conn_socket_fd = create_socket();
     printf("Created conn socket, with fd: %d\n", c->conn_socket_fd);
@@ -45,7 +63,8 @@ component_struct* component_factory(char* name){
 
     // 3. Call listen on the bound socket for incomming conn requests from clients
     ret = listen(c->conn_socket_fd, LISTEN_BACKLOG_SIZE);
-    if (ret == -1){
+    if (ret == -1)
+    {
         handle_error("conn socket listen\n");
     }
     printf("Listening conn socket for %s \n", name);
@@ -53,4 +72,24 @@ component_struct* component_factory(char* name){
     // 5. Handle connection now with data socket
 
     return c;
+}
+
+
+
+int get_fd_from_id(ComponentStruct* cs[], int num_components, int id){
+    //loop over components, get fd of one with matching id 
+    for(int i = 0; i < num_components; i++){
+        if (cs[i]->component_id == id){
+            printf("Component match : %s, with id: %d \n", cs[i]->name, cs[i]->component_id);
+
+            //if connected flag is low (component not connected) then return -1
+            if (cs[i]->connected == 0){
+                printf("Component not connected. Not writing \n");
+                return -2;
+            }
+            return cs[i]->data_socket_fd;
+        }
+    }
+    printf("No matching component found with id: %d \n", id);
+    return -1;
 }
