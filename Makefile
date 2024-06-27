@@ -1,7 +1,5 @@
-
 CC=gcc
-
-CFLAGS=-Wall
+CFLAGS=-Werror
 
 message_dispatcher: message_dispatcher.c connection.c
 	$(CC) message_dispatcher.c connection.c -o message_dispatcher $(CFLAGS)

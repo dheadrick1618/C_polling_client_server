@@ -13,8 +13,6 @@ Summer 2024
 #include <fcntl.h>
 #include "connection.h"
 
-#define LISTEN_BACKLOG_SIZE 3
-#define NAME_SIZE_MAX 32
 #define POLLING_TIMEOUT_MS 1000
 
 int main(int argc, char *argv[])
@@ -24,8 +22,7 @@ int main(int argc, char *argv[])
 
     int num_components = 2;
     ComponentStruct *dfgm_handler = component_factory("dfgm_handler", DFGM);
-    ComponentStruct *coms_handler = component_factory("coms_handler", GS);
-    //ComponentStruct *subsystem_monitor = component_factor("subsystem_monitor", SUBSYSTEM_MONITOR);
+    ComponentStruct *coms_handler = component_factory("coms_handler", COMS);
 
     // Array of pointers to components the message dispatcher interacts with
     ComponentStruct *components[2] = {dfgm_handler, coms_handler};
@@ -58,7 +55,7 @@ int main(int argc, char *argv[])
             {
                 if (pfds[i].revents & POLLIN)
                 {
-                    // IF we are waiting for a client to send a connection request 
+                    // IF we are waiting for a client to send a connection request
                     if (components[i]->connected == 0)
                     {
                         //  Accept this conn request and get the data socket fd (returned from accept())
@@ -89,11 +86,18 @@ int main(int argc, char *argv[])
                             pfds[i].fd = components[i]->conn_socket_fd; // Go back to polling the conn socket fd to listen for client connections
                             components[i]->connected = 0;               // Reset the conn flag (so we know we are back to looking for conn revents on the poll)
                             printf("Connection to socket: %s closed . {zero byte read indicates this}\n", components[i]->name);
+                            memset(buffer, 0, MESSAGE_UNIT_SIZE);
+                            continue;
                         }
-                        printf("read %zd bytes: %.*s", ret, (int)ret, buffer);
+                        printf("read %d bytes: %.*s \n", ret, ret, buffer);
 
                         int dest_id = get_msg_dest_id(buffer);
                         printf("Msg Dest ID: %d\n", dest_id);
+
+                        if(!strncmp(buffer, "DOWN", sizeof(buffer))){
+                            printf("Received DOWN - server shutting down \n");
+                            exit(EXIT_SUCCESS);
+                        } 
 
                         // Now use the component ID to determine what component (socket) to send the message to
                         // loop over components array of pointers - whichever component id enum matches the read dest id is what we are writing to
@@ -102,22 +106,17 @@ int main(int argc, char *argv[])
                         if (dest_comp_fd > -1)
                         {
                             ret = write(dest_comp_fd, buffer, sizeof(buffer));
-                            if (ret < 0){
+                            if (ret < 0)
+                            {
                                 printf("Write failed \n");
                             }
                         }
-
                         memset(buffer, 0, MESSAGE_UNIT_SIZE); // clear read buffer after handling data
                     }
                 }
             }
         }
     }
-
-    // printf("Freeing components in pointer array \n");
-    // for(int i = 0; i < num_components; i++){
-    //     free(components[i]);
-    // }
 
     exit(EXIT_SUCCESS);
 }
