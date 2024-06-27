@@ -15,6 +15,7 @@
 typedef struct component_struct
 {
     char name[32];      // Name of subsystem / payload
+    int poll_id;        // Used by the pollfds array to identify what struct its polling
     char fifo_path[32]; // Path to fifo used by Unix Domain Socket
     int connected;      // connection state [for now either con / discon] (connected / waiting for conn / ignore)
     int conn_socket_fd; // connection socket fd for polling for connection
