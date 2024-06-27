@@ -17,8 +17,8 @@ Summer 2024
 
 int main(int argc, char *argv[])
 {
-    char buffer[MESSAGE_UNIT_SIZE];
-    int ret; // used for assessing returns of various fxn calls
+    char buffer[MESSAGE_UNIT_SIZE] = { 0 };
+    int ret = 0; // used for assessing returns of various fxn calls
 
     int num_components = 2;
     ComponentStruct *dfgm_handler = component_factory("dfgm_handler", DFGM);
@@ -27,11 +27,10 @@ int main(int argc, char *argv[])
     // Array of pointers to components the message dispatcher interacts with
     ComponentStruct *components[2] = {dfgm_handler, coms_handler};
 
-    nfds_t nfds;         // num of fds we are polling
+    nfds_t nfds = num_components;         // num of fds we are polling
     struct pollfd *pfds; // fd we are polling
     int ready;           // how many fd are ready from the poll (have return event)
 
-    nfds = num_components;
     pfds = (struct pollfd *)calloc(nfds, sizeof(struct pollfd));
 
     for (int i = 0; i < num_components; i++)
@@ -96,7 +95,7 @@ int main(int argc, char *argv[])
 
                         if(!strncmp(buffer, "DOWN", sizeof(buffer))){
                             printf("Received DOWN - server shutting down \n");
-                            exit(EXIT_SUCCESS);
+                            goto CleanEnd;
                         } 
 
                         // Now use the component ID to determine what component (socket) to send the message to
@@ -116,6 +115,13 @@ int main(int argc, char *argv[])
                 }
             }
         }
+    }
+
+    CleanEnd:
+
+    free(pfds);
+    for(int i = 0; i < num_components; i++){
+        free(components[i]);
     }
 
     exit(EXIT_SUCCESS);
