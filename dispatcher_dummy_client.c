@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
 
     char *client_id = argv[1];
 
-    char fifo_name[BUFFER_SIZE];
+    char fifo_name[MESSAGE_UNIT_SIZE];
     // Arg 1 is the client 'num' which determines what named pipe to associated with the socket
     sprintf(fifo_name, "%s%s", SOCKET_PATH_PREPEND, client_id);
 
@@ -34,8 +34,8 @@ int main(int argc, char *argv[])
     memset(&addr, 0, sizeof(addr));
     int ret;
     int data_socket;
-    char socket_buf[BUFFER_SIZE];
-    char std_in_buf[BUFFER_SIZE];
+    char socket_buf[MESSAGE_UNIT_SIZE];
+    char std_in_buf[MESSAGE_UNIT_SIZE];
     int ready;
 
     // Setup polling for non blocking read
@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
                     if (i == 0)
                     { // if std in
                         printf("reading from std in: \n");
-                        fgets(std_in_buf, BUFFER_SIZE, stdin);
+                        fgets(std_in_buf, MESSAGE_UNIT_SIZE, stdin);
 
                         ret = write(data_socket, std_in_buf, strlen(std_in_buf) + 1);
                         if (ret == -1)
