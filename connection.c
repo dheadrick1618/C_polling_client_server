@@ -152,6 +152,7 @@ int read_data_socket(ComponentStruct *component, struct pollfd *poll_struct, cha
     else if (ret == 0)
     {
         poll_struct->fd = component->conn_socket_fd; // Go back to polling the conn socket fd to listen for client connections components[i]->connected = 0;               // Reset the conn flag (so we know we are back to looking for conn revents on the poll)
+        component->connected = 0;
         printf("Connection to socket: %s closed . {zero byte read indicates this}\n", component->name);
         memset(buffer, 0, MESSAGE_UNIT_SIZE);
     }
